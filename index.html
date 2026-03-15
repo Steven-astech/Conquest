@@ -12,17 +12,17 @@ body{background:var(--bg);color:var(--t);font-family:system-ui,sans-serif;min-he
 .wrap{max-width:1060px;margin:0 auto;padding:0 20px 60px}
 h1{font-size:24px;font-weight:800;color:var(--a);text-transform:uppercase;letter-spacing:-.5px}
 .sub{font-family:monospace;font-size:10px;color:var(--m);letter-spacing:2px;margin-top:4px}
-.hdr{padding:32px 0 24px;display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid var(--br);margin-bottom:28px}
+.hdr{padding:16px 0 16px;display:flex;align-items:flex-start;justify-content:space-between;border-bottom:1px solid var(--br);margin-bottom:20px;flex-wrap:wrap;gap:8px}
 .wbadge{font-family:monospace;font-size:11px;color:var(--a);border:1px solid var(--a);padding:5px 12px;border-radius:4px;opacity:.7}
-.steps{display:flex;background:var(--s);border:1px solid var(--br);border-radius:8px;overflow:hidden;margin-bottom:22px}
-.step{flex:1;padding:12px 14px;display:flex;align-items:center;gap:8px;font-size:11px;font-family:monospace;color:var(--m);border-right:1px solid var(--br);transition:all .3s;cursor:pointer}.step:hover{background:rgba(0,212,255,.04);color:var(--t)}
+.steps{display:flex;background:var(--s);border:1px solid var(--br);border-radius:8px;overflow-x:auto;overflow-y:hidden;margin-bottom:22px;-webkit-overflow-scrolling:touch;scrollbar-width:none}.steps::-webkit-scrollbar{display:none}
+.step{flex:0 0 auto;min-width:110px;padding:10px 12px;display:flex;align-items:center;gap:8px;font-size:11px;font-family:monospace;color:var(--m);border-right:1px solid var(--br);transition:all .3s;cursor:pointer}.step:hover{background:rgba(0,212,255,.04);color:var(--t)}
 .step:last-child{border-right:none}
 .step.done{color:var(--ok)}
 .step.active{color:var(--a);background:rgba(0,212,255,.05)}
 .snum{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;border:1px solid currentColor;flex-shrink:0}
 .step.done .snum{background:var(--ok);color:var(--bg);border-color:var(--ok)}
-.tabs{display:flex;gap:4px;margin-bottom:22px;border-bottom:1px solid var(--br)}
-.tab{font-family:monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;padding:10px 16px;cursor:pointer;color:var(--m);border:none;border-bottom:2px solid transparent;background:transparent;margin-bottom:-1px;transition:all .2s}
+.tabs{display:flex;gap:4px;margin-bottom:22px;border-bottom:1px solid var(--br);overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}
+.tab{font-family:monospace;font-size:10px;letter-spacing:1px;text-transform:uppercase;padding:10px 12px;cursor:pointer;color:var(--m);border:none;border-bottom:2px solid transparent;background:transparent;margin-bottom:-1px;transition:all .2s;white-space:nowrap;flex-shrink:0}
 .tab:hover{color:var(--t)}
 .tab.active{color:var(--a);border-bottom-color:var(--a)}
 .pane{display:none}
@@ -66,6 +66,16 @@ tr:hover td{background:rgba(0,212,255,.02)}
 .al.ok{background:rgba(0,230,118,.1);border:1px solid rgba(0,230,118,.3);color:var(--ok)}
 .al.warn{background:rgba(255,215,64,.1);border:1px solid rgba(255,215,64,.3);color:var(--w)}
 .next-btn{margin-top:22px;display:flex;justify-content:flex-end}
+
+@media(max-width:600px){
+  h1{font-size:18px!important}
+  .sub{font-size:9px}
+  .wbadge{font-size:9px;padding:6px 10px}
+  .card{padding:14px}
+  .ct{font-size:9px}
+  body{padding:12px!important}
+  .wrap{padding:0 12px}
+}
 </style>
 </head>
 <body>
