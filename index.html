@@ -147,7 +147,24 @@ tr:hover td{background:rgba(0,212,255,.02)}
 
   <!-- RULES -->
   <div id="pane-rules" class="pane">
-    <div class="g2">
+    <!-- BETA MODE TOGGLE -->
+    <div class="card" style="margin-bottom:18px;border:2px solid #ff6b35;background:rgba(255,107,53,.05)">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div>
+          <div class="ct" style="color:#ff6b35;margin-bottom:4px">🧪 Beta Testing Mode</div>
+          <div style="font-family:monospace;font-size:10px;color:var(--m)">When ON — schedule picks 1 old (≤2015) + 1 new (≥2024) per make per yard. No regular vehicles.</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;cursor:pointer" onclick="toggleBeta()">
+          <span style="font-family:monospace;font-size:13px;font-weight:700;color:#ff6b35" id="betaLabel">OFF</span>
+          <div id="betaToggle" style="width:52px;height:28px;border-radius:14px;background:#1a2235;border:2px solid #ff6b35;position:relative;cursor:pointer;transition:background .3s">
+            <div id="betaKnob" style="position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#5a7094;transition:all .3s"></div>
+          </div>
+        </div>
+      </div>
+      <div id="betaInfo" style="display:none;margin-top:10px;padding:8px;background:rgba(255,107,53,.1);border-radius:4px;font-family:monospace;font-size:11px;color:#ff6b35">
+        ⚡ Beta mode ON — go to Schedule tab and hit ⚡ Generate Schedule
+      </div>
+    </div>
       <div class="card">
         <div class="ct">Allowed Insurance</div>
         <div class="tags" id="insTags"></div>
@@ -258,6 +275,8 @@ tr:hover td{background:rgba(0,212,255,.02)}
         <button class="bs" onclick="addCC()">+ Add CC</button>
       </div>
     </div>
+
+    <!-- BETA MODE TOGGLE -->
   </div>
 
   <!-- SCHEDULE -->
@@ -393,25 +412,37 @@ async function sbSaveSchedule(weekDate, scheduleData){
   if(el){el.style.display='inline';el.style.color='#ffd740';el.textContent=' ⏳ Saving to cloud...';}
   try{
     var id='schedule_'+weekDate;
-    // Store only essential fields to keep payload small
     var slim=scheduleData.map(function(v){return{vin:v.vin,lot:v.lot,year:v.year,make:v.make,model:v.model,yard:v.yard,row:v.row,keys:v.keys,_day:v._day};});
     var json=JSON.stringify(slim);
-    var res=await sb.from('schedules').upsert({id:id,week_date:weekDate,schedule_json:json},{onConflict:'id'});
-    if(res.error)throw res.error;
-    if(el){el.style.color='#00e676';el.textContent=' ✓ Schedule saved to cloud';}
-    console.log('Schedule saved OK, week='+weekDate+' vehicles='+slim.length);
+    // Use raw fetch to avoid Supabase JS DataCloneError bug
+    var resp=await fetch(SB_URL+'/rest/v1/schedules',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'apikey':SB_KEY,
+        'Authorization':'Bearer '+SB_KEY,
+        'Prefer':'resolution=merge-duplicates'
+      },
+      body:JSON.stringify({id:id,week_date:weekDate,schedule_json:json})
+    });
+    if(!resp.ok){var t=await resp.text();throw new Error('HTTP '+resp.status+': '+t);}
+    if(el){el.style.color='#00e676';el.textContent=' ✓ Schedule saved to cloud ('+slim.length+' vehicles)';}
   }catch(e){
-    if(el){el.style.color='#ff6b35';el.textContent=' ✗ Cloud save failed: '+e.message;}
-    console.error('Save schedule failed:',e);
+    var msg=e.message||JSON.stringify(e);
+    if(el){el.style.color='#ff6b35';el.textContent=' ✗ Save failed: '+msg;}
+    console.error('Save schedule failed:',msg);
   }
 }
 
 async function sbLoadLatestSchedule(){
   try{
-    var res=await sb.from('schedules').select('*').order('week_date',{ascending:false}).limit(1);
-    if(res.error)throw res.error;
-    if(!res.data||!res.data.length)return null;
-    return res.data[0];
+    var resp=await fetch(SB_URL+'/rest/v1/schedules?select=*&order=week_date.desc&limit=1',{
+      headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}
+    });
+    if(!resp.ok)throw new Error('HTTP '+resp.status);
+    var data=await resp.json();
+    if(!data||!data.length)return null;
+    return data[0];
   }catch(e){console.error('Load schedule failed:',e.message);return null;}
 }
 // ── END SUPABASE ─────────────────────────────────────────────
@@ -422,6 +453,49 @@ function ymmMatch(list,v){return list.some(function(e){return e.year===String(v.
 var svKw=[];
 function isSvMatch(v){return svKw.length>0&&svKw.some(function(k){return(v.make+' '+v.model).toLowerCase().includes(k);});}
 var ccList=['DCaspersen@astech.com','steven.fairall@repairify.com','Ashley.lozada@repairify.com'];
+
+// ── NON-PASSENGER MAKES (hard blocked) ───────────────────────
+var NON_PASSENGER_MAKES=[
+  // Motorcycles
+  'harley','harley-davidson','davidson',
+  'kawasaki','ducati','ktm','triumph','royal enfield','indian motorcycle',
+  'husqvarna','aprilia','moto guzzi','benelli','cfmoto','zero motorcycles',
+  // Copart abbreviations for motorcycles
+  'harl','kawk','triumh','indam',
+  // Powersports / Jetski
+  'sea-doo','seadoo','waverunner','jet ski','polaris','arctic cat','can-am','canam',
+  'ski-doo','skidoo','bombardier',
+  // Copart abbreviations for powersports
+  'pols','seado','cana','arct','skid','bomb',
+  // ATV / UTV / Offroad
+  'john deere','kubota','massey','bobcat',
+  // Copart abbreviations for offroad/utility
+  'bash','kuba','jdee',
+  // Heavy Truck / Semi
+  'kenworth','peterbilt','freightliner','mack','international harvester',
+  'western star','autocar','sterling truck','navistar',
+  // Trailers / Other
+  'coachmen','keystone','airstream','jayco','forest river','winnebago',
+  'fleetwood','heartland','crossroads','dutchmen'
+];
+// Also block by model keywords that indicate non-passenger
+var NON_PASSENGER_MODELS=['atv','utv','side by side','sidebyside','sxs','pwc','jetski','jet ski',
+  'waverunner','snowmobile','dirtbike','dirt bike','moped','scooter','trike','quad',
+  'all model','all terrain'];
+function isNonPassenger(v){
+  var mk=(v.make||'').toLowerCase().trim();
+  var md=(v.model||'').toLowerCase().trim();
+  // Check MC row prefix as strong signal
+  var row=(v.row||'').toUpperCase().trim();
+  if(row.startsWith('MC'))return true;
+  // Check make list
+  if(NON_PASSENGER_MAKES.some(function(n){return mk.includes(n)||n.includes(mk)&&mk.length>3;}))return true;
+  // Check model keywords
+  if(NON_PASSENGER_MODELS.some(function(m){return md.includes(m);}))return true;
+  return false;
+}
+// ── END NON-PASSENGER ────────────────────────────────────────
+
 var HART_PERM_ROWS=['BP','INSP','N070','NINSP','REC1','REC2','SREC1','SINSP'];
 var rules={ins:['GEICO','State Farm'],yards:[{num:'23',loc:'Hartford'},{num:'163',loc:'Jacksonville'}],skipRows:{'23':[],'163':[]}};
 
@@ -497,6 +571,20 @@ function rebuildVinSet(){lotSet=new Set(vh.map(function(h){return String(h.vin).
 function checkElig(v){
   var reasons=[];
   if(!rules.ins.some(function(i){return v.insurance.toLowerCase().includes(i.toLowerCase());}))reasons.push('insurance');
+  if(isNonPassenger(v))reasons.push('non-passenger');
+  else{
+    // Honda/Yamaha/Suzuki/BMW also make motorcycles - check model keywords
+    var mixedMakes=['honda','yamaha','suzuki','bmw'];
+    var motoModels=['cbr','crf','shadow','rebel','fury','gold wing','goldwing','nsr','vfr','cbf',
+      'mt-','r1','r3','r6','fz-','yzf','xt','xv','v-star','vstar',
+      'gsx','gsxr','sv','dr-','boulevard',
+      'gs ','r1200','r1250','f800','f850','s1000','k1600'];
+    var mk2=(v.make||'').toLowerCase();
+    var md2=(v.model||'').toLowerCase();
+    if(mixedMakes.some(function(m){return mk2.includes(m);})){
+      if(motoModels.some(function(m){return md2.includes(m);}))reasons.push('non-passenger');
+    }
+  }
   var ym=rules.yards.find(function(y){return String(y.num).trim()===String(v.yard).trim();});
   if(!ym)reasons.push('yard');
   else if(v.keys&&v.keys!=='Y')reasons.push('no-keys');
@@ -760,6 +848,22 @@ function reapplyRules(){
 function genSched(){
   var out=document.getElementById('schedOut');
   if(!inv.length){out.innerHTML='<div class="al warn">⚠ No inventory loaded. Go to Command tab first.</div>';return;}
+  var hartYards=rules.yards.filter(function(y){return y.loc==='Hartford';}).map(function(y){return String(y.num).trim();});
+  var jaxYards=rules.yards.filter(function(y){return y.loc==='Jacksonville';}).map(function(y){return String(y.num).trim();});
+  // Beta mode takes over entirely
+  if(betaMode){
+    var ok=genBetaSched(out,hartYards,jaxYards);
+    if(!ok)return;
+    var wd0=new Date((document.getElementById('weekDate').value||new Date().toISOString().split('T')[0])+'T00:00:00');
+    var days0=['Monday','Tuesday','Wednesday','Thursday','Friday'];
+    var html0='<div class="al ok" style="border-color:#ff6b35;color:#ff6b35">🧪 Beta Schedule ready: '+schedule.length+' vehicles · Old (≤2015) + New (≥2024) per make<span id="schedSaveStatus" style="font-size:11px"></span></div>';
+    var makes0=[...new Set(schedule.map(function(v){return v.make;}))].sort();
+    html0+='<div style="font-family:monospace;font-size:10px;color:#ff6b35;margin:8px 0">Makes: '+makes0.join(', ')+'</div>';
+    renderScheduleHTML(html0, out, wd0, days0, hartYards, jaxYards);
+    var wd2=document.getElementById('weekDate').value||new Date().toISOString().split('T')[0];
+    sbSaveSchedule(wd2, schedule);
+    return;
+  }
   var pd=16,total=80,hartMax=40,jaxMax=40;
   var sv=document.getElementById('sv').value.trim().toLowerCase();
   var svQty=parseInt(document.getElementById('svQty').value)||999;
@@ -814,7 +918,8 @@ function genSched(){
       var isNc=ymmMatch(noCoverageVins,v);
       var isRt=ymmMatch(retestVins,v);
       var isSv=isSvMatch(v);
-      var priTag=isSv?'<span style="color:#00e676;font-size:9px;margin-right:4px">⭐ SPECIAL</span>':isNc?'<span style="color:#ff6b35;font-size:9px;margin-right:4px">🔴 NO COV</span>':isRt?'<span style="color:#00d4ff;font-size:9px;margin-right:4px">🔄 RETEST</span>':'';
+      var betaTag=v._betaType?'<span style="color:#ff6b35;font-size:9px;margin-right:4px;border:1px solid #ff6b35;padding:1px 4px;border-radius:2px">🧪 '+v._betaType+'</span>':'';
+      var priTag=betaTag||(isSv?'<span style="color:#00e676;font-size:9px;margin-right:4px">⭐ SPECIAL</span>':isNc?'<span style="color:#ff6b35;font-size:9px;margin-right:4px">🔴 NO COV</span>':isRt?'<span style="color:#00d4ff;font-size:9px;margin-right:4px">🔄 RETEST</span>':'');
       var rowStyle=(isSv||isNc||isRt)?' style="border-left:2px solid '+(isSv?'#00e676':isNc?'#ff6b35':'#00d4ff')+';padding-left:8px"':'';
       var lotClean=v.lot?String(v.lot).trim():'';var lotLink=lotClean?'<a href="https://www.copart.com/lot/'+lotClean+'" target="_blank" style="color:#f0a500;font-size:10px;text-decoration:none" title="View on Copart">#'+lotClean+' ↗</a>':'';
       var vidx=sc.indexOf(v);html+='<div class="drow" id="drow-'+vidx+'"'+rowStyle+'>';
@@ -846,13 +951,15 @@ function genSched(){
     '<button class="bp" style="flex:1;min-width:200px;font-size:12px;padding:13px;background:rgba(255,107,53,.12);border-color:#ff6b35;color:#ff6b35" onclick="sendFinalEmail(\'Jacksonville\')">📧 Email Jeff — Jacksonville</button>'+
     '</div></div>';
 
-  out.innerHTML=html;setStep(4);
-  // Add save status indicator
-  var schedHdr=document.querySelector('#schedOut .al.ok');
-  if(schedHdr)schedHdr.innerHTML+=" <span id='schedSaveStatus' style='font-size:11px'></span>";
-  // Auto-save schedule to Supabase
+  renderScheduleHTML(html, out, wd, days, hartYards, jaxYards);
   var wd2=document.getElementById('weekDate').value||new Date().toISOString().split('T')[0];
   sbSaveSchedule(wd2, schedule);
+}
+
+function renderScheduleHTML(html, out, wd, days, hartYards, jaxYards){
+  out.innerHTML=html;setStep(4);
+  var schedHdr=document.querySelector('#schedOut .al.ok');
+  if(schedHdr)schedHdr.innerHTML+=" <span id='schedSaveStatus' style='font-size:11px'></span>";
 }
 
 function setStep(n){for(var i=1;i<=4;i++){var e=document.getElementById('s'+i);e.classList.remove('active','done');if(i<n)e.classList.add('done');else if(i===n)e.classList.add('active');}}
@@ -1037,6 +1144,78 @@ function doSwap(idx,next){
 function closeSwap(){document.getElementById('swapModal').style.display='none';}
 
 
+
+// ── BETA MODE ─────────────────────────────────────────────────
+var betaMode=false;
+function toggleBeta(){
+  betaMode=!betaMode;
+  var tog=document.getElementById('betaToggle');
+  var knob=document.getElementById('betaKnob');
+  var lbl=document.getElementById('betaLabel');
+  var info=document.getElementById('betaInfo');
+  if(betaMode){
+    tog.style.background='rgba(255,107,53,.3)';
+    knob.style.left='27px';knob.style.background='#ff6b35';
+    lbl.textContent='ON';
+    info.style.display='block';
+  } else {
+    tog.style.background='#1a2235';
+    knob.style.left='3px';knob.style.background='#5a7094';
+    lbl.textContent='OFF';
+    info.style.display='none';
+  }
+}
+
+function genBetaSched(out, hartYards, jaxYards){
+  var el=inv.filter(function(v){return checkElig(v).ok;});
+  if(!el.length){out.innerHTML='<div class="al warn">⚠ No eligible vehicles for beta schedule.</div>';return false;}
+
+  // Get unique makes from eligible inventory
+  var makes=[...new Set(el.map(function(v){return v.make.trim().toUpperCase();}))].sort();
+
+  var hart=el.filter(function(v){return hartYards.includes(String(v.yard).trim());});
+  var jax=el.filter(function(v){return jaxYards.includes(String(v.yard).trim());});
+
+  function pickBeta(pool, make){
+    var byMake=pool.filter(function(v){return v.make.trim().toUpperCase()===make;});
+    if(!byMake.length)return[];
+    // Old: year <= 2015, closest to 2014
+    var old=byMake.filter(function(v){return parseInt(v.year)<=2015;})
+      .sort(function(a,b){return Math.abs(parseInt(a.year)-2014)-Math.abs(parseInt(b.year)-2014);});
+    // New: year >= 2024
+    var nw=byMake.filter(function(v){return parseInt(v.year)>=2024;})
+      .sort(function(a,b){return parseInt(b.year)-parseInt(a.year);});
+    var picks=[];
+    if(old.length)picks.push(Object.assign({},old[0],{_betaType:'OLD'}));
+    if(nw.length)picks.push(Object.assign({},nw[0],{_betaType:'NEW'}));
+    return picks;
+  }
+
+  var sc=[];
+  var usedLots=new Set();
+  var days=['Monday','Tuesday','Wednesday','Thursday','Friday'];
+
+  // Build beta pool per yard
+  var hartPool=[], jaxPool=[];
+  makes.forEach(function(make){
+    pickBeta(hart,make).forEach(function(v){if(!usedLots.has(v.lot)){usedLots.add(v.lot);hartPool.push(v);}});
+    pickBeta(jax,make).forEach(function(v){if(!usedLots.has(v.lot)){usedLots.add(v.lot);jaxPool.push(v);}});
+  });
+
+  // Distribute across 5 days, 8 per yard per day max
+  var hi=0,ji=0;
+  for(var d=0;d<5;d++){
+    var hSlot=0,jSlot=0;
+    while(hSlot<8&&hi<hartPool.length){var hv=Object.assign({},hartPool[hi++]);hv._day=d;sc.push(hv);hSlot++;}
+    while(jSlot<8&&ji<jaxPool.length){var jv=Object.assign({},jaxPool[ji++]);jv._day=d;sc.push(jv);jSlot++;}
+  }
+
+  if(!sc.length){out.innerHTML='<div class="al warn">⚠ No beta vehicles found. Need vehicles ≤2015 or ≥2024 in inventory.</div>';return false;}
+
+  schedule=sc.slice();
+  return true;
+}
+// ── END BETA MODE ─────────────────────────────────────────────
 // ── TECH PORTAL ─────────────────────────────────────────────
 var portalResults = {}; // keyed by vin
 
