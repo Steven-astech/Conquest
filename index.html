@@ -412,7 +412,7 @@ async function sbSaveSchedule(weekDate, scheduleData){
   if(el){el.style.display='inline';el.style.color='#ffd740';el.textContent=' ⏳ Saving to cloud...';}
   try{
     var id='schedule_'+weekDate;
-    var slim=scheduleData.map(function(v){return{vin:v.vin,lot:v.lot,year:v.year,make:v.make,model:v.model,yard:v.yard,row:v.row,keys:v.keys,_day:v._day};});
+    var slim=scheduleData.map(function(v){return{vin:v.vin,lot:v.lot,year:v.year,make:v.make,model:v.model,yard:v.yard,row:v.row,keys:v.keys,dmg:v.dmg,_day:v._day};});
     var json=JSON.stringify(slim);
     // Use raw fetch to avoid Supabase JS DataCloneError bug
     var resp=await fetch(SB_URL+'/rest/v1/schedules',{
@@ -474,23 +474,33 @@ var NON_PASSENGER_MAKES=[
   // Heavy Truck / Semi
   'kenworth','peterbilt','freightliner','mack','international harvester',
   'western star','autocar','sterling truck','navistar',
-  // Trailers / Other
+  // Copart abbreviations for heavy truck
+  'frht','kenwt','petb','frtl','intl','ceda','freig','sterlin',
+  // Trailers / RV / Other
   'coachmen','keystone','airstream','jayco','forest river','winnebago',
-  'fleetwood','heartland','crossroads','dutchmen'
+  'fleetwood','heartland','crossroads','dutchmen',
+  // Copart abbreviations for trailers/RV
+  'fvww','jayc','jay ','coac','keys','airs','winn','flee','hear','duty',
+  'trav trl','travel trl','travel trailer',
+  // Chinese/commercial vehicles
+  'jian','jiangsu','dong','dongfeng','faw ','yutong','foton','hino',
+  'isuzu','mitsubishi fuso','daihatsu'
 ];
 // Also block by model keywords that indicate non-passenger
 var NON_PASSENGER_MODELS=['atv','utv','side by side','sidebyside','sxs','pwc','jetski','jet ski',
   'waverunner','snowmobile','dirtbike','dirt bike','moped','scooter','trike','quad',
-  'all model','all terrain'];
+  'all model','all terrain','all other','travel trl','travel trailer','travel ','fifth wheel',
+  'cargo trailer','utility trailer','boat trailer','flatbed','semi truck','box truck',
+  'dump truck','motorhome','motor home','class a','class b','class c','m-40','cutaway'];
 function isNonPassenger(v){
   var mk=(v.make||'').toLowerCase().trim();
   var md=(v.model||'').toLowerCase().trim();
-  // Check MC row prefix as strong signal
   var row=(v.row||'').toUpperCase().trim();
+  // MC row = motorcycle/powersports row
   if(row.startsWith('MC'))return true;
-  // Check make list
-  if(NON_PASSENGER_MAKES.some(function(n){return mk.includes(n)||n.includes(mk)&&mk.length>3;}))return true;
-  // Check model keywords
+  // Exact make match OR make contains a blocked term
+  if(NON_PASSENGER_MAKES.some(function(n){return mk===n||mk.includes(n);}))return true;
+  // Model keyword match
   if(NON_PASSENGER_MODELS.some(function(m){return md.includes(m);}))return true;
   return false;
 }
@@ -557,10 +567,10 @@ function parseCSV(text){
   if(lines.length<2)return[];
   var heads=lines[0].split(/\t|,/).map(function(h){return h.trim().toLowerCase().replace(/"/g,'');});
   function ix(){var ns=Array.prototype.slice.call(arguments);for(var i=0;i<ns.length;i++){var n=ns[i];var f=heads.findIndex(function(h){return h.includes(n);});if(f>=0)return f;}return -1;}
-  var iV=ix('stvinnbr','vin'),iY=ix('stlotcyr','year','yr'),iMk=ix('stlotmak','make'),iMd=ix('stgrpmdl','model'),iI=ix('stslrnam','insurance','insur','ins'),iYd=ix('styrdnbr','yard'),iR=ix('styrdrow','row'),iLot=ix('stlotnbr','lot','copart'),iK=ix('sthaskys','keys','haskys');
+  var iV=ix('stvinnbr','vin'),iY=ix('stlotcyr','year','yr'),iMk=ix('stlotmak','make'),iMd=ix('stgrpmdl','model'),iI=ix('stslrnam','insurance','insur','ins'),iYd=ix('styrdnbr','yard'),iR=ix('styrdrow','row'),iLot=ix('stlotnbr','lot','copart'),iK=ix('sthaskys','keys','haskys'),iDmg=ix('stdmgtyp','dmgtype','damage');
   return lines.slice(1).map(function(line){
     var c=line.split(/\t|,/).map(function(x){return x.trim().replace(/"/g,'');});
-    var rawLot=(c[iLot]||'').trim().replace(/\.0+$/,'');var hasKeys=(c[iK]||'').trim().toUpperCase();return{vin:c[iV]||'',year:c[iY]||'',make:c[iMk]||'',model:c[iMd]||'',insurance:c[iI]||'',yard:c[iYd]||'',row:c[iR]||'',lot:rawLot,keys:hasKeys};
+    var rawLot=(c[iLot]||'').trim().replace(/\.0+$/,'');var hasKeys=(c[iK]||'').trim().toUpperCase();var dmgType=(c[iDmg]||'').trim().toUpperCase();return{vin:c[iV]||'',year:c[iY]||'',make:c[iMk]||'',model:c[iMd]||'',insurance:c[iI]||'',yard:c[iYd]||'',row:c[iR]||'',lot:rawLot,keys:hasKeys,dmg:dmgType};
   }).filter(function(v){return v.vin;});
 }
 
@@ -572,6 +582,7 @@ function checkElig(v){
   var reasons=[];
   if(!rules.ins.some(function(i){return v.insurance.toLowerCase().includes(i.toLowerCase());}))reasons.push('insurance');
   if(isNonPassenger(v))reasons.push('non-passenger');
+  if(v.dmg&&['WA','BN','BE'].includes(v.dmg))reasons.push('damage-'+v.dmg);
   else{
     // Honda/Yamaha/Suzuki/BMW also make motorcycles - check model keywords
     var mixedMakes=['honda','yamaha','suzuki','bmw'];
@@ -856,10 +867,42 @@ function genSched(){
     if(!ok)return;
     var wd0=new Date((document.getElementById('weekDate').value||new Date().toISOString().split('T')[0])+'T00:00:00');
     var days0=['Monday','Tuesday','Wednesday','Thursday','Friday'];
-    var html0='<div class="al ok" style="border-color:#ff6b35;color:#ff6b35">🧪 Beta Schedule ready: '+schedule.length+' vehicles · Old (≤2015) + New (≥2024) per make<span id="schedSaveStatus" style="font-size:11px"></span></div>';
     var makes0=[...new Set(schedule.map(function(v){return v.make;}))].sort();
-    html0+='<div style="font-family:monospace;font-size:10px;color:#ff6b35;margin:8px 0">Makes: '+makes0.join(', ')+'</div>';
-    renderScheduleHTML(html0, out, wd0, days0, hartYards, jaxYards);
+    var html0='<div class="al ok" style="border-color:#ff6b35;color:#ff6b35">🧪 Beta Schedule ready: '+schedule.length+' vehicles · Old (≤2015) + New (≥2024) per make<span id="schedSaveStatus" style="font-size:11px"></span></div>';
+    html0+='<div style="font-family:monospace;font-size:10px;color:#ff6b35;margin:8px 0 16px">Makes: '+makes0.join(', ')+'</div>';
+    // Build day blocks same as normal schedule
+    days0.forEach(function(day,di){
+      var dayBlock=schedule.slice(di*16,(di+1)*16);
+      if(!dayBlock.length)return;
+      var dd=new Date(wd0);dd.setDate(wd0.getDate()+di);
+      var ds=dd.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+      html0+='<div class="dblock"><div class="dhead"><span>'+day+'</span><span class="m">'+ds+' · '+dayBlock.length+' vehicles</span></div>';
+      dayBlock.forEach(function(v,si){
+        var yn=(rules.yards.find(function(y){return y.num===v.yard;})||{}).loc||v.yard;
+        var yc=hartYards.includes(String(v.yard).trim())?'#00d4ff':'#ff6b35';
+        var betaTag=v._betaType?'<span style="color:#ff6b35;font-size:9px;margin-right:4px;border:1px solid #ff6b35;padding:1px 4px;border-radius:2px">🧪 '+v._betaType+'</span>':'';
+        var lotClean=v.lot?String(v.lot).trim():'';
+        var lotLink=lotClean?'<a href="https://www.copart.com/lot/'+lotClean+'" target="_blank" style="color:#f0a500;font-size:10px;text-decoration:none">#'+lotClean+' ↗</a>':'';
+        var vidx=schedule.indexOf(v);
+        html0+='<div class="drow" id="drow-'+vidx+'">';
+        html0+='<span style="color:#5a7094">'+(si+1)+'</span>';
+        html0+='<span style="font-weight:700;color:#00d4ff">'+betaTag+v.vin+' '+lotLink+'</span>';
+        html0+='<span>'+v.year+' '+v.make+' '+v.model+'</span>';
+        html0+='<span style="color:'+yc+'">'+yn+'</span>';
+        html0+='<span style="color:#5a7094;font-size:10px">Row '+v.row+'</span>';
+        html0+='<span><button class="bs" style="font-size:9px;padding:4px 10px;border-color:#5a7094;color:#5a7094" onclick="showSwap('+vidx+')">⇄ Change</button></span>';
+        html0+='</div>';
+      });
+      html0+='</div>';
+    });
+    html0+='<div class="card" style="margin-top:18px;border:1px solid #ffd740"><div class="ct" style="color:#ffd740">📋 Review & Send</div>'+
+      '<div style="display:flex;gap:12px;flex-wrap:wrap">'+
+      '<button class="bp" style="flex:1;min-width:200px;font-size:12px;padding:13px;background:rgba(0,212,255,.12);border-color:#00d4ff;color:#00d4ff" onclick="sendFinalEmail(\'Hartford\')">📧 Email Scott — Hartford</button>'+
+      '<button class="bp" style="flex:1;min-width:200px;font-size:12px;padding:13px;background:rgba(255,107,53,.12);border-color:#ff6b35;color:#ff6b35" onclick="sendFinalEmail(\'Jacksonville\')">📧 Email Jeff — Jacksonville</button>'+
+      '</div></div>';
+    out.innerHTML=html0;setStep(4);
+    var schedHdr=document.querySelector('#schedOut .al.ok');
+    if(schedHdr)schedHdr.innerHTML+=(" <span id='schedSaveStatus' style='font-size:11px'></span>");
     var wd2=document.getElementById('weekDate').value||new Date().toISOString().split('T')[0];
     sbSaveSchedule(wd2, schedule);
     return;
